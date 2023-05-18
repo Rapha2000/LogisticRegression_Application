@@ -15,3 +15,7 @@ This project, carried out at IMT Mines Alès as part of an elective course, took
 
 On this repo, you will find our R markdown file with outputs hidden, the visual support for our defense and an introductory document our tutor gave us at the beginning of our project explaining the different steps of the work and giving some details about variables.
 
+## The repo
+
+On this repo, you will fin the r source code, the r markdown html file (with no outputs for easier reading) and the slides used during the defense in front of the jury.
+
