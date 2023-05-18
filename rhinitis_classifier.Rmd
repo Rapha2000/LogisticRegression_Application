@@ -1,0 +1,567 @@
+---
+title: "rhinitis_classifier"
+author: "Raphaël Sève"
+date: "2023-05-13"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE, warnings=FALSE)
+```
+
+
+```{r echo = T, results = 'hide'}
+
+# we install the needed packages
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE, repos="http://cran.r-project.org")
+  sapply(pkg, require, character.only = TRUE)
+}
+
+packages <- c("ggplot2","tidyverse", "dplyr", "car","funModeling","VIM","summarytools", "gtsummary", "cowplot", "here","parallel","recipes", "nortest", "MASS", "rcompanion", "caret", "ggpubr", "lmtest", "caTools", "ROCR","boot", "Ecdat")
+
+ipak(packages)
+
+```
+
+
+# Modeling the impact of air quality on respiratory diseases
+
+**Group** : Amine MEKKI / Raphael SEVE / Kaiyuan GONG
+
+## I- Abstract
+
+The occurrence of respiratory illnesses brought on by industrial pollution has increased along with the expansion of industry. Therefore, is it possible to **describe and predict** the association between
+**respiratory diseases** and **air quality** using a **model** ?
+
+Our team (students Amine, Raphael, and Kaiyuan, with mentor Ms.Dupas) obtainied information from close to 400 locals of **Etang de Barre, France**, where the prevalence of asthma is higher than the nation's
+mean. We then managed and analyzed the data under Access and Rstudio to create a solid **logistic regression model** that accurately predicts the severity of allergic rhinitis by gender, age, treatment, and airborne NO2 and pollen levels in the region.
+
+
+## II- Introduction
+
+### 1. Context
+
+#### 1.1 Presentation of the study
+
+The study area (south of France) is highly exposed to pollens with a significant presence of cypress pollen. The Etang de Berre area is a significant industrial zone where emissions of industrial pollution (from petrochemicals, metallurgy, cement, etc.) and transport-related pollution (from airports, a network of roads and highways, and maritime transport) are produced. The national average for asthma prevalence is around 7%, while this location with high environmental stakes has a frequency of 17%.
+
+The study involved gathering information on actual allergic rhinitis and asthma symptoms from volunteers using the MASK-air® mobile application, as well as information on exposure to pollens and air pollution. All
+pollen seasons were covered by the data collection, which spanned a year.
+
+Those who took part in the study had to be:
+
+* At least 18 years old,
+
+* Experiencing seasonally induced allergic rhinitis (hay fever, pollen allergy)
+
+
+#### 1.2 Presentation of the data
+
+The original data are contained in 5 separate data tables:
+
+* Suivi_symptomes_exposition.xlsx
+
+* ALL_users_MaskPaca.xlsx
+
+* Profil_User.xlsx
+
+* traitements_quotidiens.xlsx
+
+* Medicaments_PACA.xlsx
+
+The current data is summed up in two csv files:
+
+* Dataset.csv
+
+* Users.csv
+
+
+### 2. Objective/Mission
+
+**Model** the impact of air quality (pollution and pollens) on respiratory diseases.
+
+
+## III- Method
+
+### 1. Data management
+
+#### 1.1 Merging the tables
+
+We used Access to integrate the five initial tables into two data sets:
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//img/Figure%201.1.png)
+
+#### 1.2 Importing the dataset
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//img/Access.png){width="357"}
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//img/Rstudio.jpeg){width="256"}
+
+
+The first dataframe called "dataset" is our working table, gathering all the dataframes of the study. The second dataframe is only useful to describe the variables of the study because some variables of the
+dataframe "users" have not been add to the working dataframe "dataset".
+
+```{r echo = T, results = 'hide'}
+
+dataset = read.csv2("Dataset.csv")
+
+users = read.csv2("Users.csv")
+
+```
+
+Such as every beginning of all data related project, let's have a first
+at our data:
+
+```{r echo = T, results = 'hide'}
+summary(dataset)
+```
+
+#### 1.3 Data management
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//DataSet.png){width="450"}
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//Users.png){width="176"}
+
+We found that after merging all the tables of **dataset**, the dataframe "dataset" has a length of:
+
+```{r}
+
+length(unique(dataset$member_id)) 
+
+```
+
+
+and since the second dataframe "users" has 382 member, we created the next "for" loop to check the member's id in both of tables (dataset and users) in order to keep in both dataframes only members with the same
+ids. So the following code will delete from the dataframe "users" all
+the ids that doesn't exist in "dataset":
+
+```{r echo = T, results = 'hide'}
+
+Id_membre_User_data <- users$ï..id
+Id_membre_Dataset <- unique(dataset$member_id)
+
+for (i in sort(Id_membre_User_data)) {
+  if (i %in% sort(Id_membre_Dataset)) {
+    next
+  }
+  else {
+    users <- users[-which(users$ï..id==i),]
+  }
+}
+```
+
+
+Let's now take a look at our dataset structure:
+
+```{r echo = T, results = 'hide'}
+str(dataset)
+```
+
+We can notice that our dataset has many Numeric values that are considered as Character values, so we need to convert them: 
+
+```{r echo = T, results = 'hide'}
+dataset[, c(1, 2, 4:7, 9, 10, 12:37, 81:89)] <- sapply(dataset[, c(1, 2, 4:7, 9, 10, 12:37, 81:89)], as.numeric)
+```
+
+
+### 2. Description of the study population
+
+In a first time, let's take a look at some of the data related to the
+users.
+
+```{r echo = F, results = 'hide', message=FALSE, r, warning=FALSE, fig.show='hide'}
+
+funModeling::freq(users, plot=TRUE)
+
+
+```
+
+It would be more interesting if we see our data by group: 
+
+```{r echo = T, results = 'hide'}
+
+by(users,users$gender,summarytools::freq)
+by(users,users$asthma,summarytools::freq)
+
+```
+
+
+Then, in a second time, to describe the quantitative variables with
+mathematical tools, we can use the function summary():
+
+```{r echo = T, results = 'hide'}
+summary(dataset)
+```
+
+Let's look at the rhinitis symptoms mean for male and female:
+
+```{r echo = T, results = 'hide'}
+by(dataset,dataset$gender, summarytools::descr,heading=FALSE,transpose =TRUE)
+```
+
+Finally, we can produce a synthetic descriptive table with the package
+gtsummary:
+
+```{r echo = T, results = 'hide'}
+dataset %>% 
+    tbl_summary() 
+
+```
+
+```{r echo = T, results = 'hide'}
+# ages
+
+toy_df <- data.frame(
+  age = users$age
+)
+
+toy_df <- toy_df %>% 
+  mutate(
+    # Create categories
+    age_group = dplyr::case_when(
+      age >= 20 & age < 30 ~ "20-30",
+      age >= 30 & age < 40 ~ "30-40",
+      age >= 40 & age < 50 ~ "40-50",
+      age >= 50 & age < 60 ~ "50-60",
+      age >= 60 & age < 70 ~ "60-70", 
+      age >= 70 & age < 80 ~ "70-80", 
+      age >= 80 & age < 90 ~ "80-90"
+    ),
+    # Convert to factor
+    age_group = factor(
+      age_group,
+      level = c("20-30", "30-40", "40-50", "50-60", "60-70", "70-80", "80-90")
+    )
+  )
+
+
+agePlot <- ggplot(toy_df, aes(x=age_group)) + geom_bar(stat = 'count', show.legend = FALSE) + geom_label(stat = "count", aes(label= ..count..), show.legend = FALSE) 
+#agePlot
+
+hist(dataset$rhinitis_symptoms)
+
+hist(dataset$atmosudno2)
+
+```
+
+
+### 4. Modelisation (Linear & Logistic regression) In order
+
+#### 4.1 Linear Regression
+-   **Introduction**
+
+Mathematical Formula of Linear Regression: y = b0 + b1\*x + e où b0
+and b1 are the beta coefficients of the regression and e the error
+residual (it summarizes all the explanatory variables influencing
+on the explained variable y and which are not taken into account)
+
+The beta coefficients are determined in such a way as to minimize the Residual
+Sum of Squares (RSS) and therefore to reduce to the most linear model
+possible (least squares method).
+
+$$ RSS = \sum_{i=1}^{n} (y_{i}-f(x_{i}))^{2}$$
+
+The p-value defines the significance of the beta coefficients
+
+For a given explanatory variable x, the p-value tests whether there is a
+significant relationship between the latter and the explained variable y
+
+To carry out this test, we place ourselves under the following hypothesis H0: -
+(H0): the beta coefficients are zero (no relationship between x and y) -
+(Ha): the coefficients are different from zero (there is a relation
+between x and y)
+
+The smaller the value of p, the greater the probability of making an error.
+rejecting the null hypothesis is weak. A limit value of 0.05 is
+often used. That is, you can reject the null hypothesis
+if the p-value is less than 0.05. So, if the p-value is
+\<0.05, we can include the explanatory variable x in our model
+
+The calculation of the p-value is as follows: this is which is is what
+it is useful to explain it
+
+There are 3 indicators to check after calculating a regression
+linear to check its quality:
+
+* Residual Standard Error (RSE): closer to zero the better
+
+* Pearson's linear coefficient of determination R2: higher the better
+
+* The F test: higher the better
+
+
+The CSR coefficient represents the average variation of the points
+observations with the linear regression line. It's the deviation
+residual error standard.
+
+The Pearson coefficient of determination R2 represents the proportion
+data that can be explained by the constructed linear model.
+It is therefore between 0 and 1.
+
+The F test is used to judge the overall significance of the model. (useful
+especially for multivariate regressions)
+
+-   **Visual assessment of linearity**
+
+```{r echo = T, results = 'hide'}
+
+dataset_lm <- dataset
+hist(dataset_lm$rhinitis_symptoms)
+
+pval <- c()
+for ( i in 1:100) {
+  abc <- dataset_lm[sample(nrow(dataset_lm), 5000), "rhinitis_symptoms"]
+  pval <- c(pval,shapiro.test(abc)[2]$p.value)
+}
+mean(pval)
+```
+
+From the graph above, we can see that our dependent variable doesn't follow a normal distribution.
+The shapiro wilk test confirms it.
+
+Let's try to transform it and make it normal.
+
+-   **Data Transformation**
+
+```{r echo = T, results = 'hide', warning=FALSE}
+
+# the powerTrasform function requires non null values thats why we are adding 0.5 to values that are equal to 0.
+dataset_lm$rhinitis_symptoms[which(dataset_lm$rhinitis_symptoms==0)] <- 0.5
+
+# Data Trasforming
+pow_trans_coef <- powerTransform(dataset_lm$rhinitis_symptoms)
+
+# powering our data to the lambda
+dataset_lm$rhinitis_symptoms <- bcPower(dataset_lm$rhinitis_symptoms,pow_trans_coef$roundlam)
+
+dataset_lm$rhinitis_symptoms <- dataset_lm$rhinitis_symptoms^0.1586
+
+ggdensity(dataset_lm$rhinitis_symptoms, 
+          main = "Density plot of tooth length",
+          xlab = "Tooth length")
+
+# Shapiro test after transformation
+pval_after <- c()
+for ( i in 1:100) {
+  data_after_trans <- dataset_lm[sample(nrow(dataset_lm), 5000), "rhinitis_symptoms"]
+  pval_after <- c(pval_after,shapiro.test(data_after_trans)[2]$p.value)
+}
+
+mean(pval_after)
+```
+
+Even after doing a data transformation, our dependent variable is always
+not normal. So we decided to model with logistic regression.
+
+#### 5.2 Logistic regression
+-   **Introduction**
+
+     > We do not model the binary response directly (sick/not
+     > sick) but the probability of occurrence of one of the two
+     > terms and conditions
+     >
+     > This probability cannot be modeled by a straight line because we
+     > would have values \<0 or \>1. It is then modeled by a curve
+     > sigmoid defined by the logistic function.
+     >
+     > In the case of a single explanatory variable X, the equation of the
+     > logistics function is:
+
+$$ \pi(X) = Prob(Y=1/ X = x) = \frac{\exp(\beta_{0}+\beta_{1}\times x_{1}) + ...+ \beta_{k}\times x_{k}}{1 + {\exp(\beta_{0}+\beta_{1}\times x_{1} + ...+ \beta_{k}\times x_{k})}}  $$
+
+
+$$ i \in [1:k]$$ Y : Dependent variable : Y = 0/1. Xi : Independent
+variable i. xi : The value of the independent variable Xi. 
+- The previous model not being linear, we are reduced to a linear model
+thanks to the logit transformation:
+
+$$ logit(P) = logit(\frac{\pi(x)}{1-\pi(x)})= \beta_{0}+\beta_{1}\times x_{1} + ...+ \beta_{k}\times x_{k}$$
+
+> p/(1-p) is an Odds Ratio (OR). This parameter measures the
+> relationship between the explanatory variable (X) and the response Y
+>
+> The beta coefficients resulting from the logistic regression are therefore
+> log odds ratio.
+>
+> If OR significantly \< 1 then the explanatory variable is a
+> protective factor
+>
+> If OR not significantly different from 1 then no link between Y
+> and X
+>
+> If OR significantly \> 1 then the explanatory variable is a
+> risk factor
+
+Then, if X is a categorical explanatory variable, we distinguish 2
+case:
+
+> 1. The frequency of occurrence (disease, recurrence, etc.) is rare
+> (\<10%), then we interpret the OR as a relative risk (RR), and we
+> then interprets the significance of this odds ratio with the
+> corresponding p-value.
+>
+> 2. The frequency of realization is not uncommon. In this situation the OR
+> cannot be interpreted as a relative risk.
+
+Finally, if X is a continuous numerical explanatory variable, we
+also does not interpret the value of OR.
+
+-   **Univariate Analysis**
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//img/table.png)
+
+```{r echo = T, results = 'hide'}
+# A copy of our dataset to work on.
+dataset_glm <- dataset
+dataset_glm$gender <- ifelse(dataset_glm$gender == "F",0,1)
+
+# Dichotomize the dependent variable rhinitis_symptoms
+dataset_glm$rhinitis_symptoms[which(dataset_glm$rhinitis_symptoms>=0.25)] <- 1
+
+# Factorizing the dependent variable.
+dataset_glm$rhinitis_symptoms <- as.factor(dataset_glm$rhinitis_symptoms)
+
+varias <- c("age" ,  "gender", "atmosudno2", "atmosudo3", "atmosudpm10", "atmosudpm2_5", "rnsaapiambroisies", "rnsaapiarmoises", "rnsaapiaulne", "rnsaapibouleau", "rnsaapicharme", "rnsaapichataignier", "rnsaapichene", "rnsaapicypres", "rnsaapifrene", "rnsaapigraminees", "rnsaapinoisetier", "rnsaapiolivier", "rnsaapipeuplier", "rnsaapiplantain", "rnsaapiplatane", "rnsaapirumex", "rnsaapisaule", "rnsaapitilleul", "rnsaapiurticacees", "Medicine_count")
+
+intercepet_coef <- c()
+attr_coef <- c()
+p_value <- c()
+glm_models <- c()
+
+
+for (name in varias) {
+  mod_rs_poll <- glm(dataset_glm$rhinitis_symptoms ~ dataset_glm[,name], family=binomial, data=dataset_glm)
+  glm_models <- c(glm_models,mod_rs_poll)
+  intercepet_coef <- c(intercepet_coef,mod_rs_poll$coefficients[1])
+  attr_coef <- c(attr_coef,mod_rs_poll$coefficients[2])
+  if (nrow(summary(mod_rs_poll)$coefficients)==2 ) {
+    p_value <- c(p_value,summary(mod_rs_poll)$coefficients[2,4])
+  }
+  if (nrow(summary(mod_rs_poll)$coefficients)==1 ) {
+    p_value <- c(p_value,summary(mod_rs_poll)$coefficients[1,4])
+  }
+  
+}
+
+Table5 <- data.frame( Feature = varias, Intercepet = intercepet_coef, coefficient_B =attr_coef, P_value= p_value, OR=exp(attr_coef))
+
+# we only take those variables with p value < 20%
+table6 <- Table5[Table5$P_value <= 0.2,]
+table6 <- table6[table6$P_value != 0,]
+
+
+
+```
+
+-   **Multivariate Analysis**
+
+![](https://cdn.jsdelivr.net/gh/Super-homme/FigureBed@main//img/table2.png)
+
+```{r echo = T, results = 'hide'}
+ multivarite_variables <- c("Intercept","age" ,  "gender" ,  "atmosudno2" ,   "rnsaapiambroisies" ,   "rnsaapiarmoises" ,   "rnsaapiaulne" ,   "rnsaapichataignier" ,   "rnsaapicypres" ,   "rnsaapifrene" ,   "rnsaapinoisetier" ,   "rnsaapiolivier" ,   "rnsaapipeuplier" ,   "rnsaapiplantain" ,   "rnsaapiplatane" ,   "rnsaapiurticacees" ,  "Medicine_count")
+    
+# # Splitting dataset
+ split <- sample.split(dataset_glm, SplitRatio = 0.8)
+ split
+ 
+ train_reg <- subset(dataset_glm, split == "TRUE")
+ test_reg <- subset(dataset_glm, split == "FALSE")
+
+ glm_model_multi <- glm(rhinitis_symptoms ~ age + gender + atmosudno2 +  rnsaapiambroisies +  rnsaapiarmoises +  rnsaapiaulne +  rnsaapichataignier +  rnsaapicypres +  rnsaapifrene +  rnsaapinoisetier +  rnsaapiolivier +  rnsaapipeuplier +  rnsaapiplantain +  rnsaapiplatane +  rnsaapiurticacees + Medicine_count, family=binomial, data=dataset_glm)
+ 
+ Table7 <- data.frame( Feature = multivarite_variables,  coefficient_B = glm_model_multi$coefficients, P_value= summary(glm_model_multi)$coefficients[,4], OR=exp(glm_model_multi$coefficients))
+ 
+ # we only take those variables with p value < 5%
+ Table7 <- Table7[Table7$P_value <= 0.05,]
+
+ 
+ # surdispersion
+ model_surdispersion <- glm_model_multi$deviance/glm_model_multi$df.residual # <1 no overdispersion
+```
+
+### 5. Prediction using LOOCV (Leave one-out cross validation)
+
+```{r echo = T, results = 'hide'}
+
+#LOOCV
+myModelMSE <- NULL
+accuracy <- NULL
+ for(i in 1:nrow(dataset_glm))
+ {
+     # Train-test splitting
+     # dataset total -> 14493 suivis
+     # 14492 suivis -> fitting
+     # 1 suivi -> testing
+     train <- dataset_glm[-i,]
+     test <- dataset_glm[i,]
+     
+     # Fitting
+     model <- glm(rhinitis_symptoms ~ age + gender + atmosudno2 + rnsaapicypres + Medicine_count, family=binomial, data=dataset_glm)
+     # Predict results
+     results_prob <- predict(model, subset(test,select=c(12, 23, 37,38, 89)),type='response')
+     
+     # If prob > 0.5 then 1, else 0
+     results <- ifelse(results_prob > 0.5,1,0)
+     
+     # Actual answers
+     actuals <- test$rhinitis_symptoms
+     
+     # Calculate accuracy
+     misClasificError <- mean(actuals != results)
+     
+     # Collecting results
+     accuracy[i] <- 1- misClasificError
+     
+ }
+
+# Average accuracy of the model
+accuracy <- na.omit(accuracy) # In my accuracy i have NA element's because in my data i have NA elements. so i have to remove them from my accuracies
+mean(accuracy) # now i get the mean accuracy of my GLM model.
+
+# Histogram of the model accuracy
+ hist(accuracy,xlab='Accuracy',ylab='Freq',main='Accuracy LOOCV',
+      col='cyan',border='blue',density=30)
+
+```
+
+
+## IV- Results et Conclusion
+
+We create a solid logistic regression model that accurately predicts the
+severity of allergic rhinitis by gender, age, treatment, and airborne
+NO2 and pollen levels in the region.create a solid logistic regression
+model that accurately predicts the severity of allergic rhinitis by
+gender, age, treatment, and airborne NO2 and pollen levels in the
+region.
+
+-   **Prediction rule**
+
+To predict the condition of an individual:
+
+We collect the value of NO2, Age , Sex, Cypress Pollen and number of
+drugs he took.
+
+We calculate P(Y=1) thanks to the mathematical formula.
+
+> if **P \> 0.5** subject with aggravated rhinitis
+>
+> otherwise subject with weak rhinitis
+
+-   **Calculation of the performance of our model**
+
+> train_dataset : N - 1 rows of the table.
+>
+> test_dataset : the remaining row.
+>
+> N number of iterations = number of rows
+>
+> Prediction on the row we put next to it
+
+-   **Accuracy** = Percentage of correct classification = **81.76%**
+
+
